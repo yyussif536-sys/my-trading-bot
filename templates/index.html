@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Trading Bot — Paper Trading</title>
+<style>
+  :root {
+    --bg: #0d1117; --card: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e;
+    --green: #3fb950; --red: #f85149; --blue: #58a6ff; --yellow: #d29922;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, 'Segoe UI', Roboto, sans-serif; padding: 20px; }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .card .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; }
+  .card .value { font-size: 20px; font-weight: 600; }
+  .green { color: var(--green); } .red { color: var(--red); } .blue { color: var(--blue); } .yellow { color: var(--yellow); }
+  .row { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; margin-bottom: 16px; }
+  @media (max-width: 900px) { .row { grid-template-columns: 1fr; } }
+  .panel { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  .panel h2 { font-size: 14px; margin-bottom: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+  #chart, #equityChart { width: 100%; height: 260px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { text-align: left; color: var(--muted); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  td { padding: 6px 8px; border-bottom: 1px solid #21262d; }
+  .log { max-height: 500px; overflow-y: auto; font-size: 12px; font-family: ui-monospace, monospace; }
+  .log div { padding: 4px 0; border-bottom: 1px solid #21262d; }
+  .log .t { color: var(--muted); margin-right: 8px; }
+  button { background: #21262d; color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px 16px; font-size: 13px; cursor: pointer; margin-right: 8px; }
+  button:hover { background: #30363d; }
+  button.primary { background: #1f6feb; border-color: #1f6feb; }
+  button.danger { border-color: var(--red); color: var(--red); }
+  .signal-badge { display: inline-block; padding: 4px 14px; border-radius: 20px; font-weight: 700; font-size: 16px; }
+  .sig-BUY { background: rgba(63,185,80,.15); color: var(--green); }
+  .sig-SELL { background: rgba(248,81,73,.15); color: var(--red); }
+  .sig-HOLD { background: rgba(210,153,34,.15); color: var(--yellow); }
+  .bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 12px; }
+  .bar-row .name { width: 110px; color: var(--muted); }
+  .bar-track { flex: 1; height: 8px; background: #21262d; border-radius: 4px; overflow: hidden; }
+  .bar-fill { height: 100%; background: var(--blue); border-radius: 4px; }
+  .controls { margin-bottom: 16px; }
+  #btResult { margin-top: 12px; font-size: 13px; line-height: 1.7; }
+  .disclaimer { margin-top: 20px; padding: 12px 16px; border: 1px solid var(--yellow); border-radius: 10px; color: var(--yellow); font-size: 12px; }
+</style>
+</head>
+<body>
+  <h1>🤖 AI Trading Bot <span style="font-weight:400;color:var(--muted)">— BTC/USD paper trading</span></h1>
+  <div class="sub">Gradient Boosting model · hourly Kraken candles · $10,000 virtual money · <span id="status">connecting…</span></div>
+
+  <div class="controls">
+    <button class="primary" id="toggleBtn" onclick="toggleAuto()">⏸ Pause auto-trading</button>
+    <button onclick="runBacktest()" id="btBtn">📊 Run backtest</button>
+    <button class="danger" onclick="resetPortfolio()">↺ Reset portfolio</button>
+  </div>
+
+  <div class="grid">
+    <div class="card"><div class="label">BTC Price</div><div class="value" id="price">—</div></div>
+    <div class="card"><div class="label">AI Signal</div><div class="value" id="signal">—</div></div>
+    <div class="card"><div class="label">Prob. next hour up</div><div class="value" id="prob">—</div></div>
+    <div class="card"><div class="label">Model accuracy</div><div class="value" id="acc">—</div></div>
+    <div class="card"><div class="label">Portfolio value</div><div class="value" id="equity">—</div></div>
+    <div class="card"><div class="label">Total return</div><div class="value" id="ret">—</div></div>
+    <div class="card"><div class="label">Win rate</div><div class="value" id="winrate">—</div></div>
+  </div>
+
+  <div class="row">
+    <div class="panel"><h2>BTC/USD — last 200 hours</h2><svg id="chart"></svg></div>
+    <div class="panel">
+      <h2>What the model looks at</h2><div id="features"></div>
+      <h2 style="margin-top:16px">Live indicator values (AI's current input)</h2>
+      <table><tbody id="indicatorRows"></tbody></table>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="panel">
+      <h2>Open position & trades</h2>
+      <div id="positions" style="margin-bottom:12px;font-size:13px"></div>
+      <table><thead><tr><th>Time (UTC)</th><th>Side</th><th>Price</th><th>PnL</th><th>Reason</th></tr></thead>
+      <tbody id="tradeRows"></tbody></table>
+    </div>
+    <div class="panel"><h2>Bot activity log</h2><div class="log" id="log"></div></div>
+  </div>
+
+  <div class="panel" id="btPanel" style="display:none">
+    <h2>Backtest result (walk-forward, ~last 30 days)</h2>
+    <div id="btResult"></div>
+    <svg id="equityChart"></svg>
+  </div>
+
+  <div class="disclaimer">⚠️ Educational paper-trading only — no real money involved. Past or simulated performance never guarantees future results. Crypto is highly volatile; never trade money you can't afford to lose.</div>
+
+<script>
+const fmt$ = n => n == null ? '—' : '$' + n.toLocaleString(undefined, {maximumFractionDigits: 2});
+const fmtPct = n => n == null ? '—' : (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
+
+function drawLine(svgId, points, color) {
+  const svg = document.getElementById(svgId);
+  const W = svg.clientWidth || 600, H = svg.clientHeight || 260, P = 40;
+  if (!points.length) return;
+  const ys = points.map(p => p.y);
+  const min = Math.min(...ys), max = Math.max(...ys), range = (max - min) || 1;
+  const x = i => P + (W - P - 10) * i / (points.length - 1);
+  const y = v => H - 24 - (H - 44) * (v - min) / range;
+  let d = points.map((p, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ',' + y(p.y).toFixed(1)).join('');
+  let labels = '';
+  for (let k = 0; k <= 4; k++) {
+    const v = min + range * k / 4;
+    labels += `<text x="4" y="${y(v)+4}" fill="#8b949e" font-size="10">${v >= 1000 ? (v/1000).toFixed(1)+'k' : v.toFixed(0)}</text>
+               <line x1="${P}" y1="${y(v)}" x2="${W-10}" y2="${y(v)}" stroke="#21262d"/>`;
+  }
+  svg.innerHTML = labels + `<path d="${d}" fill="none" stroke="${color}" stroke-width="2"/>`;
+}
+
+async function refresh() {
+  try {
+    const s = await (await fetch('/api/status')).json();
+    document.getElementById('status').textContent = s.status === 'running' ? '🟢 live' : (s.error || s.status);
+    document.getElementById('price').textContent = fmt$(s.price);
+    if (s.prediction) {
+      document.getElementById('signal').innerHTML = `<span class="signal-badge sig-${s.prediction.signal}">${s.prediction.signal}</span>`;
+      document.getElementById('prob').textContent = (s.prediction.prob_up * 100).toFixed(1) + '%';
+      document.getElementById('prob').className = 'value ' + (s.prediction.prob_up > 0.5 ? 'green' : 'red');
+    }
+    document.getElementById('acc').textContent = s.model_accuracy ? (s.model_accuracy * 100).toFixed(1) + '%' : '—';
+    const p = s.portfolio;
+    document.getElementById('equity').textContent = fmt$(p.equity);
+    document.getElementById('ret').textContent = fmtPct(p.total_return_pct);
+    document.getElementById('ret').className = 'value ' + (p.total_return_pct >= 0 ? 'green' : 'red');
+    document.getElementById('winrate').textContent = p.win_rate_pct == null ? '—' : p.win_rate_pct + '%';
+
+    document.getElementById('positions').innerHTML = p.open_positions.length
+      ? p.open_positions.map(o => `<b>${o.symbol}</b>: ${o.qty.toFixed(6)} BTC @ ${fmt$(o.entry_price)} → now ${fmt$(o.current_price)}
+          <span class="${o.unrealized_pnl >= 0 ? 'green' : 'red'}">(${fmt$(o.unrealized_pnl)} / ${fmtPct(o.change_pct)})</span>`).join('<br>')
+      : '<span style="color:var(--muted)">No open position — bot is waiting for a BUY signal.</span>';
+
+    document.getElementById('tradeRows').innerHTML = s.trades.map(t =>
+      `<tr><td>${t.time.slice(5, 16).replace('T', ' ')}</td>
+       <td class="${t.side === 'BUY' ? 'green' : 'red'}">${t.side}</td>
+       <td>${fmt$(t.price)}</td>
+       <td class="${t.pnl > 0 ? 'green' : t.pnl < 0 ? 'red' : ''}">${t.pnl == null ? '—' : fmt$(t.pnl)}</td>
+       <td style="color:var(--muted)">${t.reason}</td></tr>`).join('');
+
+    document.getElementById('log').innerHTML = s.log.map(l =>
+      `<div><span class="t">${l.time}</span>${l.msg}</div>`).join('');
+
+    const IND_HELP = {
+      rsi: 'RSI (<30 oversold, >70 overbought)',
+      ema_fast_ratio: 'Price vs 9h average',
+      ema_slow_ratio: 'Price vs 21h average',
+      ema_cross: 'Fast vs slow trend',
+      macd_hist: 'MACD momentum',
+      boll_pct_b: 'Position in Bollinger bands (0-1)',
+      ret_1: 'Return last 1h', ret_3: 'Return last 3h', ret_6: 'Return last 6h',
+      volatility: '12h volatility',
+      volume_ratio: 'Volume vs 20h average',
+    };
+    document.getElementById('indicatorRows').innerHTML =
+      Object.entries(s.indicators_now || {}).map(([k, v]) =>
+        `<tr><td style="color:var(--muted)">${IND_HELP[k] || k}</td>
+         <td style="text-align:right;font-family:monospace">${v == null ? '—' : v}</td></tr>`).join('');
+
+    const fi = Object.entries(s.feature_importance || {});
+    const maxImp = Math.max(...fi.map(([, v]) => v), 0.01);
+    document.getElementById('features').innerHTML = fi.map(([k, v]) =>
+      `<div class="bar-row"><span class="name">${k}</span>
+       <div class="bar-track"><div class="bar-fill" style="width:${(v / maxImp * 100).toFixed(0)}%"></div></div>
+       <span style="width:44px;text-align:right">${(v * 100).toFixed(1)}%</span></div>`).join('');
+
+    document.getElementById('toggleBtn').textContent = s.auto_trade ? '⏸ Pause auto-trading' : '▶ Resume auto-trading';
+  } catch (e) { document.getElementById('status').textContent = 'reconnecting…'; }
+}
+
+async function loadChart() {
+  try {
+    const candles = await (await fetch('/api/candles')).json();
+    drawLine('chart', candles.map(c => ({y: c.close})), '#58a6ff');
+  } catch (e) {}
+}
+
+async function toggleAuto() { await fetch('/api/toggle', {method: 'POST'}); refresh(); }
+async function resetPortfolio() {
+  if (confirm('Reset paper portfolio back to $10,000?')) { await fetch('/api/reset', {method: 'POST'}); refresh(); }
+}
+async function runBacktest() {
+  const btn = document.getElementById('btBtn');
+  btn.textContent = '⏳ Backtesting… (~30s)'; btn.disabled = true;
+  try {
+    const r = await (await fetch('/api/backtest', {method: 'POST'})).json();
+    document.getElementById('btPanel').style.display = 'block';
+    document.getElementById('btResult').innerHTML =
+      `Strategy return: <b class="${r.total_return_pct >= 0 ? 'green' : 'red'}">${fmtPct(r.total_return_pct)}</b> &nbsp;·&nbsp;
+       Buy &amp; hold: <b class="${r.buy_and_hold_pct >= 0 ? 'green' : 'red'}">${fmtPct(r.buy_and_hold_pct)}</b> &nbsp;·&nbsp;
+       Trades: <b>${r.num_trades}</b> &nbsp;·&nbsp; Win rate: <b>${r.win_rate_pct ?? '—'}%</b> &nbsp;·&nbsp;
+       Max drawdown: <b class="red">${r.max_drawdown_pct}%</b>`;
+    drawLine('equityChart', r.equity_curve.map(p => ({y: p.equity})), '#3fb950');
+    document.getElementById('btPanel').scrollIntoView({behavior: 'smooth'});
+  } finally { btn.textContent = '📊 Run backtest'; btn.disabled = false; }
+}
+
+refresh(); loadChart();
+setInterval(refresh, 5000);
+setInterval(loadChart, 60000);
+</script>
+</body>
+</html>

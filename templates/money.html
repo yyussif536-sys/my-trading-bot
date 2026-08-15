@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>My Trading Money</title>
+<style>
+  :root {
+    --bg: #0a0e14; --card: #141a24; --border: #232b3a;
+    --text: #f0f4f8; --muted: #93a1b5;
+    --green: #2ecc71; --red: #ff5c5c; --blue: #4da3ff; --yellow: #f5b942;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, 'Segoe UI', Roboto, sans-serif; padding: 16px; max-width: 720px; margin: 0 auto; }
+  header { text-align: center; margin: 12px 0 20px; }
+  header h1 { font-size: 20px; font-weight: 600; }
+  header .live { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--green); margin-right: 5px; animation: pulse 2s infinite; }
+  @keyframes pulse { 50% { opacity: .3; } }
+
+  .money-card { background: linear-gradient(135deg, #16203a, #101828); border: 1px solid var(--border); border-radius: 18px; padding: 28px 20px; text-align: center; margin-bottom: 14px; }
+  .money-card .label { color: var(--muted); font-size: 13px; margin-bottom: 8px; }
+  .money-card .big { font-size: 44px; font-weight: 700; letter-spacing: -1px; }
+  .money-card .change { font-size: 17px; margin-top: 6px; font-weight: 600; }
+
+  .duo { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
+  .mini { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 16px; text-align: center; }
+  .mini .label { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+  .mini .val { font-size: 21px; font-weight: 600; }
+
+  .section { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 18px; margin-bottom: 14px; }
+  .section h2 { font-size: 14px; color: var(--muted); margin-bottom: 12px; font-weight: 600; }
+
+  .robot-say { display: flex; gap: 12px; align-items: center; }
+  .robot-say .emoji { font-size: 34px; }
+  .robot-say .text { font-size: 15px; line-height: 1.5; }
+
+  .trade { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); }
+  .trade:last-child { border-bottom: none; }
+  .trade .what { font-size: 14px; }
+  .trade .when { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .trade .amount { font-size: 15px; font-weight: 600; text-align: right; }
+  .badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px; margin-right: 6px; }
+  .b-buy { background: rgba(46,204,113,.15); color: var(--green); }
+  .b-sell { background: rgba(255,92,92,.15); color: var(--red); }
+  .green { color: var(--green); } .red { color: var(--red); } .yellow { color: var(--yellow); }
+  .empty { color: var(--muted); font-size: 14px; text-align: center; padding: 16px 0; }
+  .note { font-size: 12px; color: var(--muted); text-align: center; margin: 18px 0 8px; line-height: 1.6; }
+  a.adv { color: var(--blue); text-decoration: none; font-size: 12px; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>💰 My Trading Money</h1>
+    <div class="live"><span class="dot"></span>Robot is watching the market — updates every few seconds</div>
+  </header>
+
+  <div class="money-card">
+    <div class="label">Your money right now (started with $10,000 pretend money)</div>
+    <div class="big" id="equity">$—</div>
+    <div class="change" id="change">—</div>
+  </div>
+
+  <div class="duo">
+    <div class="mini"><div class="label">Bitcoin price</div><div class="val" id="price">—</div></div>
+    <div class="mini"><div class="label">Robot's mood</div><div class="val" id="mood">—</div></div>
+  </div>
+
+  <div class="section">
+    <h2>🤖 WHAT THE ROBOT IS THINKING</h2>
+    <div class="robot-say">
+      <div class="emoji" id="robotEmoji">🤔</div>
+      <div class="text" id="robotText">Waking up and studying the market…</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>📦 WHAT YOU OWN RIGHT NOW</h2>
+    <div id="holdings" class="empty">Loading…</div>
+  </div>
+
+  <div class="section">
+    <h2>🧾 ALL TRADES (newest first)</h2>
+    <div id="trades" class="empty">Loading…</div>
+  </div>
+
+  <div class="note">
+    ⚠️ This is pretend money for learning — nothing real is at risk.<br>
+    Curious about the technical details? <a class="adv" href="/pro">Open the advanced dashboard →</a>
+  </div>
+
+<script>
+const $ = id => document.getElementById(id);
+const money = n => '$' + Number(n).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+
+function friendlyTime(iso) {
+  const d = new Date(iso);
+  return d.toLocaleDateString(undefined, {month: 'short', day: 'numeric'}) + ', ' +
+         d.toLocaleTimeString(undefined, {hour: '2-digit', minute: '2-digit'});
+}
+
+async function refresh() {
+  try {
+    const s = await (await fetch('/api/status')).json();
+    const p = s.portfolio;
+
+    // big money number
+    $('equity').textContent = money(p.equity);
+    const diff = p.equity - 10000;
+    $('change').textContent = (diff >= 0 ? '▲ up ' : '▼ down ') + money(Math.abs(diff)) +
+      ' (' + (p.total_return_pct >= 0 ? '+' : '') + p.total_return_pct + '%)';
+    $('change').className = 'change ' + (diff >= 0 ? 'green' : 'red');
+
+    // price + mood
+    $('price').textContent = s.price ? money(s.price) : '—';
+    if (s.prediction) {
+      const sig = s.prediction.signal;
+      const conf = Math.round(s.prediction.prob_up * 100);
+      if (sig === 'BUY') {
+        $('mood').innerHTML = '<span class="green">😃 Wants to buy</span>';
+        $('robotEmoji').textContent = '😃';
+        $('robotText').innerHTML = `I think there's a <b>${conf}% chance</b> Bitcoin goes <b class="green">UP</b> in the next hour, so I want to <b class="green">BUY</b>.`;
+      } else if (sig === 'SELL') {
+        $('mood').innerHTML = '<span class="red">😟 Wants to sell</span>';
+        $('robotEmoji').textContent = '😟';
+        $('robotText').innerHTML = `I think there's only a <b>${conf}% chance</b> Bitcoin goes up — it will probably go <b class="red">DOWN</b>. ` +
+          (p.open_positions.length ? 'So I\'m <b class="red">SELLING</b> what we own.' : 'We own no Bitcoin, so I\'m <b>staying out</b> and keeping your money safe in cash.');
+      } else {
+        $('mood').innerHTML = '<span class="yellow">😐 Waiting</span>';
+        $('robotEmoji').textContent = '😐';
+        $('robotText').innerHTML = `I'm not sure which way Bitcoin will go (${conf}% chance of up), so I'm <b class="yellow">WAITING</b> for a clearer opportunity.`;
+      }
+    }
+
+    // holdings
+    if (p.open_positions.length) {
+      $('holdings').classList.remove('empty');
+      $('holdings').innerHTML = p.open_positions.map(o => {
+        const win = o.unrealized_pnl >= 0;
+        return `<div class="trade">
+          <div>
+            <div class="what">🪙 ${o.qty.toFixed(5)} Bitcoin</div>
+            <div class="when">bought at ${money(o.entry_price)} → now ${money(o.current_price)}</div>
+          </div>
+          <div class="amount ${win ? 'green' : 'red'}">${win ? '+' : ''}${money(o.unrealized_pnl)}<br>
+          <span style="font-size:11px">${win ? 'winning' : 'losing'} so far</span></div>
+        </div>`;
+      }).join('');
+    } else {
+      $('holdings').className = 'empty';
+      $('holdings').textContent = '💵 Everything is in cash — the robot is waiting for a good moment to buy.';
+    }
+
+    // trades
+    if (s.trades.length) {
+      $('trades').classList.remove('empty');
+      $('trades').innerHTML = s.trades.map(t => {
+        const isBuy = t.side === 'BUY';
+        let right;
+        if (isBuy) right = `<div class="amount">${money(t.qty * t.price)}<br><span style="font-size:11px;color:var(--muted)">spent</span></div>`;
+        else {
+          const win = t.pnl >= 0;
+          right = `<div class="amount ${win ? 'green' : 'red'}">${win ? '+' : ''}${money(t.pnl)}<br><span style="font-size:11px">${win ? 'profit 🎉' : 'loss'}</span></div>`;
+        }
+        return `<div class="trade">
+          <div>
+            <div class="what"><span class="badge ${isBuy ? 'b-buy' : 'b-sell'}">${isBuy ? 'BOUGHT' : 'SOLD'}</span>${t.qty.toFixed(5)} BTC at ${money(t.price)}</div>
+            <div class="when">${friendlyTime(t.time)}</div>
+          </div>${right}</div>`;
+      }).join('');
+    } else {
+      $('trades').className = 'empty';
+      $('trades').textContent = 'No trades yet — the robot hasn\'t found a good opportunity. Check back soon!';
+    }
+  } catch (e) {
+    $('robotText').textContent = 'Reconnecting to the robot…';
+  }
+}
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>
