@@ -12,7 +12,7 @@ import time
 import pandas as pd
 import requests
 
-HARD_DEADLINE = 25       # seconds max per network call
+HARD_DEADLINE = 12       # seconds max per network call
 CANDLE_CACHE_SEC = 300   # refetch candles at most every 5 minutes
 PRICE_CACHE_SEC = 45     # refetch price at most every 45 seconds
 
@@ -55,6 +55,32 @@ def _std_df(rows):
 
 
 # ---------------- candle sources (hourly) ----------------
+def _ohlc_cryptocompare(symbol):
+    """CryptoCompare: an aggregator built for server-side use, no key needed."""
+    fsym = {"BTC/USD": "BTC", "ETH/USD": "ETH"}[symbol]
+    data = _fetch_json("https://min-api.cryptocompare.com/data/v2/histohour",
+                       {"fsym": fsym, "tsym": "USD", "limit": 720})
+    if data.get("Response") != "Success":
+        raise RuntimeError(str(data.get("Message", "cryptocompare error"))[:80])
+    rows = data["Data"]["Data"]
+    return _std_df([[r["time"], r["open"], r["high"], r["low"], r["close"],
+                     r["volumefrom"]] for r in rows])
+
+
+def _ohlc_coingecko(symbol):
+    """CoinGecko: free aggregator. Hourly prices for the last 30 days."""
+    coin = {"BTC/USD": "bitcoin", "ETH/USD": "ethereum"}[symbol]
+    data = _fetch_json(f"https://api.coingecko.com/api/v3/coins/{coin}/market_chart",
+                       {"vs_currency": "usd", "days": "30"})
+    prices = data["prices"]           # [[ts_ms, price], ...] hourly
+    vols = {int(t // 3600000): v for t, v in data.get("total_volumes", [])}
+    rows = []
+    for ts_ms, price in prices:
+        vol = vols.get(int(ts_ms // 3600000), 0.0)
+        rows.append([int(ts_ms // 1000), price, price, price, price, vol])
+    return _std_df(rows)
+
+
 def _ohlc_kraken(symbol):
     pair = {"BTC/USD": "XBTUSD", "ETH/USD": "ETHUSD"}[symbol]
     data = _fetch_json("https://api.kraken.com/0/public/OHLC",
@@ -92,6 +118,20 @@ def _ohlc_okx(symbol):
 
 
 # ---------------- price sources ----------------
+def _price_cryptocompare(symbol):
+    fsym = {"BTC/USD": "BTC", "ETH/USD": "ETH"}[symbol]
+    data = _fetch_json("https://min-api.cryptocompare.com/data/price",
+                       {"fsym": fsym, "tsyms": "USD"})
+    return float(data["USD"])
+
+
+def _price_coingecko(symbol):
+    coin = {"BTC/USD": "bitcoin", "ETH/USD": "ethereum"}[symbol]
+    data = _fetch_json("https://api.coingecko.com/api/v3/simple/price",
+                       {"ids": coin, "vs_currencies": "usd"})
+    return float(data[coin]["usd"])
+
+
 def _price_kraken(symbol):
     pair = {"BTC/USD": "XBTUSD", "ETH/USD": "ETHUSD"}[symbol]
     data = _fetch_json("https://api.kraken.com/0/public/Ticker", {"pair": pair})
@@ -120,9 +160,11 @@ def _price_okx(symbol):
 
 # ---------------- public API with rotation + caching ----------------
 _OHLC_SOURCES = [("kraken", _ohlc_kraken), ("coinbase", _ohlc_coinbase),
-                 ("bitstamp", _ohlc_bitstamp), ("okx", _ohlc_okx)]
+                 ("bitstamp", _ohlc_bitstamp), ("okx", _ohlc_okx),
+                 ("coingecko", _ohlc_coingecko)]
 _PRICE_SOURCES = [("kraken", _price_kraken), ("coinbase", _price_coinbase),
-                  ("bitstamp", _price_bitstamp), ("okx", _price_okx)]
+                  ("bitstamp", _price_bitstamp), ("okx", _price_okx),
+                  ("coingecko", _price_coingecko)]
 
 # remember which source worked last and try it first next time
 _preferred = {"ohlc": 0, "price": 0}
