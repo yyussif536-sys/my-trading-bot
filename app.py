@@ -179,6 +179,13 @@ def ping():
     return jsonify({"ok": True, "status": state["status"], "time": datetime.now(timezone.utc).isoformat()})
 
 
+@app.route("/api/diag")
+def api_diag():
+    """Test every data source from this server — shows which ones work here."""
+    from bot.data import diagnose, last_used
+    return jsonify({"sources": diagnose(SYMBOL), "currently_using": last_used})
+
+
 # Start the trading loop — self-healing version.
 # If the loop thread ever dies or didn't start in this process (which can
 # happen on hosting services after sleep/restart), any web request revives it.
